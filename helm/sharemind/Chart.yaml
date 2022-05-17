@@ -1,0 +1,7 @@
+apiVersion: v2
+name: sharemind
+description: A Helm chart for deploying Sharemind Application Servers and web gateway
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+

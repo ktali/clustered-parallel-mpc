@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+configMapGenerator:
+- files:
+  - sssd/bins/communication.sb
+  - sssd/bins/computation.sb
+  - sssd/bins/create_tables.sb
+  - sssd/bins/preupload.sb
+  - sssd/bins/finalize_upload.sb
+  - coocurrence/bins/map.sb
+  - coocurrence/bins/partition.sb
+  - coocurrence/bins/reduce.sb
+  - coocurrence/bins/split_input.sb
+  - coocurrence/bins/upload_data.sb
+  name: secrec-binaries
+  options:
+    disableNameSuffixHash: true

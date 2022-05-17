@@ -1,0 +1,170 @@
+{{- /*
+     * Copyright (C) Cybernetica AS
+     *
+     * All rights are reserved. Reproduction in whole or part is prohibited
+     * without the written consent of the copyright owner. The usage of this
+     * code is subject to the appropriate license agreement.
+     */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: web-gateway
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+ name: web-gateway
+rules:
+- apiGroups: ["apps"]
+  resources: ["secrets", "statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+ name: web-gateway
+subjects:
+- kind: ServiceAccount
+  name: web-gateway
+roleRef:
+ kind: Role
+ name: web-gateway
+ apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "sharemind.fullname" . }}-web-gateway-client
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  {{- $root := .Values -}}
+  {{- $workerSetName := (print (include "sharemind.fullname" .) "-set") -}}
+  {{- $workerServiceName := (print (include "sharemind.fullname" .) "-headless") -}}
+  {{- range (untilStep 0 (int .Values.clique.maxParallelism) 1) }}
+  gateway{{ . }}.cfg: |-
+    UuidNamespace={{ $root.clique.uuidNamespace }}
+    [Random]
+    Engine = CHACHA20
+    BufferMode = THREAD
+    BufferSize = 1048576
+    [Network]
+    PublicKeyFile=/gateway/keys/{{ base $root.webGateway.pkey }}
+    PrivateKeyFile=/gateway/keys/{{ base $root.webGateway.skey }}
+    ConnectTimeout={{ $root.webGateway.connectTimeout }}
+    [Server {{ $root.worker.identity.name }}]
+    Address={{ $workerSetName }}-{{ . }}.{{ $workerServiceName }}.{{ $root.ns }}.svc.{{ $root.clusterDomain }}
+    Port={{ $root.worker.internalPort }}
+    PublicIdentity=/gateway/keys/{{ base $root.worker.identity.pkey }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "sharemind.fullname" . }}-web-gateway-scriptinfo
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  {{- $root := .Values -}}
+  {{- $workerServiceUrlPrefix := include "sharemind.fullname" . -}}
+  {{- range .Values.programs }}
+  {{ .name }}.yaml: |-
+    name: {{ .binary }}
+    type: {{ .type }}
+    {{- if eq .type "multi" }}
+    otherServerNames:
+    {{- range $root.worker.parties }}
+    - "{{ .name }}"
+    {{- end }}
+    {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ template "sharemind.fullname" . }}-web-gateway
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+type: Opaque
+data:
+  {{- $files := .Files }}
+  {{- range tuple .Values.webGateway.pkey .Values.webGateway.skey .Values.worker.identity.pkey }}
+  {{ base . }}: |-
+    {{ required (printf "File '%s' is missing" .) ($files.Get . | b64enc) }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "sharemind.fullname" . }}-web-gateway
+spec:
+  selector:
+    app: {{ template "sharemind.name" . }}-web-gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "sharemind.fullname" . }}-web-gateway
+  labels:
+    app: {{ template "sharemind.name" . }}-web-gateway
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ template "sharemind.name" . }}-web-gateway
+  template:
+    metadata:
+      labels:
+        app: {{ template "sharemind.name" . }}-web-gateway
+    spec:
+      serviceAccountName: web-gateway
+      containers:
+      - name: web-gateway
+        image: {{ .Values.images.webGateway }}
+        imagePullPolicy: Always
+        command: ["./parallel-gateway-app"]
+        args:
+        - -c=/gateway/client/gateway.cfg
+        - -p={{ .Values.webGateway.port }} 
+        - -i=/gateway/scriptinfo
+        ports:
+        - containerPort: {{ .Values.webGateway.port }}
+        volumeMounts:
+        - name: client-configs
+          mountPath: /gateway/client
+        - name: scriptinfo
+          mountPath: /gateway/scriptinfo
+        - name: secrets
+          mountPath: /gateway/keys
+      imagePullSecrets:
+      - name: regcred
+      volumes:
+      - name: client-configs
+        configMap:
+          name: {{ template "sharemind.fullname" . }}-web-gateway-client
+      - name: scriptinfo
+        configMap:
+          name: {{ template "sharemind.fullname" . }}-web-gateway-scriptinfo
+      - name: secrets
+        secret:
+          secretName: {{ template "sharemind.fullname" . }}-web-gateway
+

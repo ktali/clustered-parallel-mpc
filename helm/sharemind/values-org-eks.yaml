@@ -1,0 +1,101 @@
+ns: default
+clusterDomain: "cluster.local"
+
+worker:
+
+  logLevel: 4
+
+  internalPort: 30000
+    
+  # Identity of the current worker 
+  identity:
+    name: OrganizationEKS
+    pkey: keys/org-eks-public-key
+    skey: keys/org-eks-private-key
+
+  # Other parties
+  parties:
+  - name: OrganizationGKE
+    mirrorDesignation: org-gke
+    pkey: keys/org-gke-public-key
+  - name: OrganizationAKS
+    mirrorDesignation: org-aks
+    pkey: keys/org-aks-public-key
+
+  # Participants in Shared3p protection domain    
+  shared3p:
+    parties:
+      - OrganizationGKE
+      - OrganizationAKS
+      - OrganizationEKS
+
+  clients:
+    - name: WebGateway
+      pkey: keys/client-WebGateway-public-key
+      serverRules:
+      - "execute:* = WebGateway"
+      tabledbRules:
+      - "*:* = WebGateway"
+      - "DS1:*:*:* = WebGateway"
+
+clique:
+  # Number of cliques that can be run in parallel
+  maxParallelism: 17
+  uuidNamespace: TestInstance
+  
+webGateway:
+  pkey: keys/client-WebGateway-public-key
+  skey: keys/client-WebGateway-private-key
+  connectTimeout: 30000
+  port: 8080
+
+programs:
+- name: test_shared3p_client
+  binary: test_shared3p_client.sb
+  type: multi
+  # "otherServerNames" dynamically templated in Helm based on .Values.worker.parties
+- name: test_single
+  binary: test_single.sb
+  type: single
+  # BSP programs
+- name: create_tables
+  binary: create_tables.sb
+  type: multi
+- name: preupload
+  binary: preupload.sb
+  type: multi
+- name: computation
+  binary: computation.sb
+  type: multi
+- name: communication
+  binary: communication.sb
+  type: multi
+- name: finalize_upload
+  binary: finalize_upload.sb
+  type: multi
+  # MR programs
+- name: map
+  binary: map.sb
+  type: multi
+- name: partition
+  binary: partition.sb
+  type: multi
+- name: reduce
+  binary: reduce.sb
+  type: multi
+- name: upload_data
+  binary: upload_data.sb
+  type: multi
+- name: split_input
+  binary: split_input.sb
+  type: multi
+
+secrecBinariesConfigmap: secrec-binaries
+hdf5StorageClass: efs-sc
+
+hdf5StorageAmount: 5Gi
+
+images:
+  webGateway: "<YOUR DOCKER REGISTRY>/sharemind-parallel-gateway:0.1"
+  worker: "<YOUR DOCKER REGISTRY>/sharemind:0.1"
+

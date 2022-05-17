@@ -1,0 +1,39 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+application {
+    mainClassName = 'ee.cybernetica.sharemind.app.Main'
+}
+
+jar {
+    manifest {
+        attributes "Main-Class": "ee.cybernetica.sharemind.app.Main"
+    }
+}
+
+dependencies {
+    implementation (files("jni-sharemind-gateway.jar"))
+    implementation ('org.slf4j:slf4j-api:1.7.30')
+    implementation ('org.slf4j:slf4j-log4j12:1.7.30')
+    implementation ('log4j:log4j:1.2.17')
+
+    implementation ('io.socket:socket.io-server:3.0.2')
+    implementation ('io.socket:engine.io-server:5.0.1')
+    implementation ('io.socket:engine.io-server-jetty:5.0.1')
+
+    implementation ('org.eclipse.jetty:jetty-server:9.4.35.v20201120')
+    implementation ('org.eclipse.jetty:jetty-servlet:9.4.35.v20201120')
+    implementation ('org.eclipse.jetty.websocket:websocket-server:9.4.35.v20201120')
+
+    implementation 'com.google.code.gson:gson:2.8.6'
+    implementation 'commons-cli:commons-cli:1.5.0'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.1'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.13.0'
+    implementation 'io.fabric8:kubernetes-client:5.12.2'
+}

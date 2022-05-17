@@ -1,0 +1,115 @@
+ns: default
+clusterDomain: "cluster.local"
+
+# Sharemind Server specific configuration
+worker:
+  logLevel: 4
+  internalPort: 30000
+    
+  identity:
+    # Full commonly agreed name of the party (alphanumeric, no spaces)
+    name:
+    # Path to the public key of the party 
+    pkey:
+    # Path to the private key of the party
+    skey:
+
+  # Other parties participating in MPC excluding your own
+  parties:
+      # The full commonly agreed name for the first neighbour
+    - name:
+      # Its short dns compliant name ($SHORT_NAME)
+      mirrorDesignation:
+      # Public key of the party
+      pkey:
+      # The full commonly agreed name for the second neighbour
+    - name:
+      # Its short dns compliant name ($SHORT_NAME)
+      mirrorDesignation:
+      # Public key of the party
+      pkey:
+
+  # Participants in the three-party mpc. If there are only three parties, specify the names of all the parties INCLUDING your own
+  shared3p:
+    parties:
+      - 
+      - 
+      - 
+
+  # The clients and their access control rules; Identities that can run MPC processes on the servers and access databases.
+  clients:
+      # The only client is the Gateway.
+    - name: WebGateway
+      pkey: keys/client-WebGateway-public-key
+      serverRules:
+      - "execute:* = WebGateway"
+      tabledbRules:
+      - "*:* = WebGateway"
+      - "DS1:*:*:* = WebGateway"
+ 
+clique:
+  # Number of cliques that can be run in parallel
+  maxParallelism: 17
+  # Sharemind process negotiation namespace
+  uuidNamespace: TestInstance
+
+# Gateway specific configuration
+webGateway:
+  # Public key of the gateway
+  pkey: keys/client-WebGateway-public-key
+  # Secret key of the gateway
+  skey: keys/client-WebGateway-private-key
+  connectTimeout: 30000
+  # Gateway's outward facing port for accepting clients
+  port: 8080
+
+# MPC programs in the cluster
+#   'name' is used by the client to specify the program
+#   'binary' is the actual compiled SecreC code in the servers `programs` directory.
+#   'type' indicates whether it is a multi-party or single party program
+programs:
+  # BSP programs
+- name: create_tables
+  binary: create_tables.sb
+  type: multi
+- name: preupload
+  binary: preupload.sb
+  type: multi
+- name: computation
+  binary: computation.sb
+  type: multi
+- name: communication
+  binary: communication.sb
+  type: multi
+- name: finalize_upload
+  binary: finalize_upload.sb
+  type: multi
+  # MR programs
+- name: map
+  binary: map.sb
+  type: multi
+- name: partition
+  binary: partition.sb
+  type: multi
+- name: reduce
+  binary: reduce.sb
+  type: multi
+- name: upload_data
+  binary: upload_data.sb
+  type: multi
+- name: split_input
+  binary: split_input.sb
+  type: multi
+
+# The name of the Kubernetes ConfigMap that encodes the SecreC program binaries. See README for details
+secrecBinariesConfigmap: secrec-binaries
+
+# Cluster specific Kubernetes StorageClass that allows to provision database PersistentVolumes on cloud storage.
+hdf5StorageClass: azurefile-csi-premium
+# The requested amount of storage for the PersistentVolume
+hdf5StorageAmount: 5Gi
+
+# Registry paths and names of the gateway and Sharemind images
+images:
+  webGateway: "<YOUR DOCKER REGISTRY>/sharemind-parallel-gateway:0.1"
+  worker: "<YOUR DOCKER REGISTRY>/sharemind:0.1"

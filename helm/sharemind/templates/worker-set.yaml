@@ -1,0 +1,289 @@
+{{- /*
+     * Copyright (C) Cybernetica AS
+     *
+     * All rights are reserved. Reproduction in whole or part is prohibited
+     * without the written consent of the copyright owner. The usage of this
+     * code is subject to the appropriate license agreement.
+     */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "sharemind.fullname" . }}
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  shared3p.cfg: |
+    [ProtectionDomain]
+    MulVecFragmentSize = 100000
+    EqVecFragmentSize = 100000
+    {{- range $index, $party := .Values.worker.shared3p.parties }}
+    [Node{{ add $index 1 }}]
+    ServerName = {{ $party }}
+    {{- end }}
+  tabledb.cfg: |
+    [DBModule1]
+    File = libsharemind_mod_tabledb_hdf5.so
+    [DataSource1]
+    Name = DS1
+    DBModule = tabledb_hdf5
+    Configuration = /etc/sharemind/tabledb-hdf5.cfg
+  tabledb-hdf5.cfg: |
+    DatabasePath = /var/lib/sharemind/tdbhdf5/DS1
+  access-control.cfg: |
+    {{- range .Values.worker.clients }}
+    [User {{ .name }}]
+    TlsPublicKeyFile = /root/sharemind/{{ base .pkey }}
+    {{- end }}
+    [Ruleset sharemind:server]
+    {{- range .Values.worker.clients }}
+    {{- range .serverRules }}
+    {{ . }}
+    {{- end }}
+    {{- end }}
+    [Ruleset sharemind:tabledb]
+    {{- range .Values.worker.clients }}
+    {{- range .tabledbRules }}
+    {{ . }}
+    {{- end }}
+    {{- end }}
+  server-template.cfg: |
+    [Random]
+    Engine = CHACHA20
+    BufferMode = THREAD
+    BufferSize = 1048576
+    [Server]
+    LicenseFile = /root/sharemind/license.p7b
+    UuidNamespace = {{ .Values.clique.uuidNamespace }}
+    Name = {{ .Values.worker.identity.name }}
+    ;ProgramPaths = /var/lib/sharemind/programs/
+    LogLevel = {{ .Values.worker.logLevel }}
+    LogToSyslog = no
+    SyslogIdent = SharemindAppserv
+    SyslogFacility = LOG_USER
+    LogToFile = yes
+    LogFile = /var/log/sharemind/%F-%H-%M-%S-Appserv.log
+    Profiler = on
+    Audit = off
+    ProgramCacheSize = 100
+    Dumpable = on
+    NumGcThreads = 1
+    [Network]
+    ListenInterfaces = 0.0.0.0:{{ .Values.worker.internalPort }}
+    PublicKeyFile = /root/sharemind/{{ base .Values.worker.identity.pkey }}
+    PrivateKeyFile = /root/sharemind/{{ base .Values.worker.identity.skey }}
+    BatchSize = 100000
+    FlushVectors = off
+    [AccessControl]
+    PoliciesFile = /etc/sharemind/access-control.cfg
+    [Module shared3p]
+    File = libsharemind_mod_shared3p.so
+    [Module algorithms]
+    File = libsharemind_mod_algorithms.so
+    [Module tabledb]
+    File = libsharemind_mod_tabledb.so
+    Configuration = /etc/sharemind/tabledb.cfg
+    [ProtectionDomain pd_shared3p]
+    Kind = shared3p
+    Configuration = /etc/sharemind/shared3p.cfg
+    {{- range .Values.worker.parties }} 
+    [Server {{ .name }}]
+    Address = test-sharemind-set-${HOSTNAME##*-}.test-sharemind-headless-{{ .mirrorDesignation }}.default.svc.cluster.local
+    Port = 30000 
+    PublicIdentity = /root/sharemind/{{ base .pkey }}
+    {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ template "sharemind.fullname" . }}
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+type: Opaque
+data:
+  {{- $files := .Files }}
+  {{- range tuple "license.p7b" .Values.worker.identity.pkey .Values.worker.identity.skey }}
+  {{ base . }}: |-
+    {{ required (printf "File '%s' is missing" .) ($files.Get . | b64enc) }}
+  {{- end }}
+  {{- range .Values.worker.clients }}
+  {{ base .pkey }}: |-
+    {{ required (printf "Public key of client '%s' is missing (%s)" .name .pkey) ($files.Get .pkey | b64enc) }}
+  {{- end }}  
+  {{- range .Values.worker.parties }}
+  {{ base .pkey }}: |-
+    {{ required (printf "Public key of party '%s' is missing (%s)" .name .pkey) ($files.Get .pkey | b64enc) }}
+  {{- end }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ template "sharemind.fullname" . }}-hdf5-ds1
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  storageClassName: {{ .Values.hdf5StorageClass }}
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.hdf5StorageAmount }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "sharemind.fullname" . }}-headless
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    mirror.linkerd.io/exported: "true"
+    linkerd.io/inject: enabled
+spec:
+  ports:
+  - port: {{ .Values.worker.internalPort }}
+    name: worker-internal
+  clusterIP: None
+  clusterIPs:
+  - None
+  type: ClusterIP
+  selector:
+    app: {{ template "sharemind.fullname" . }}-set
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ template "sharemind.fullname" . }}-set
+  labels:
+    app: {{ template "sharemind.name" . }}
+    chart: {{ template "sharemind.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    linkerd.io/inject: enabled
+spec:
+  serviceName: {{ template "sharemind.fullname" . }}-headless
+  replicas: 1  # Use web-gateway API to request parallel instances
+  selector:
+    matchLabels:
+      app: {{ template "sharemind.fullname" . }}-set
+  template:
+    metadata:
+      labels:
+        app: {{ template "sharemind.fullname" . }}-set
+      annotations:
+        linkerd.io/inject: enabled
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - {{ template "sharemind.fullname" . }}-set
+              topologyKey: "kubernetes.io/hostname"
+      initContainers:
+      - name: init-fetch-clique-idx
+        image: alpine
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - >-
+            eval "echo \"$(cat /etc/sharemind/server-template.cfg)\"" > /root/generated-conf/server.cfg && 
+            mkdir /var/log/sharemind/profiles
+        volumeMounts:
+        - name: config
+          mountPath: /etc/sharemind
+        - name: generated-config
+          mountPath: /root/generated-conf/
+        - name: logs
+          mountPath: /var/log/sharemind
+      containers:
+      - name: {{ template "sharemind.fullname" . }}-worker
+        image: {{ .Values.images.worker }}
+        imagePullPolicy: Always
+        command: ["sharemind-server"]
+        args:
+        - "--conf=/root/generated-conf/server.cfg"
+        ports:
+        - containerPort: {{ .Values.worker.internalPort }}
+          name: worker-internal
+        volumeMounts:
+        - name: config
+          mountPath: /etc/sharemind
+        - name: generated-config
+          mountPath: /root/generated-conf/
+        - name: secrets
+          mountPath: /root/sharemind
+        - name: database
+          mountPath: /var/lib/sharemind/tdbhdf5/DS1
+        - name: programs
+          mountPath: /var/lib/sharemind/programs
+        - name: logs
+          mountPath: /var/log/sharemind
+      imagePullSecrets:
+      - name: regcred
+      volumes:
+        - name: database
+          persistentVolumeClaim:
+            claimName: {{ template "sharemind.fullname" . }}-hdf5-ds1
+        - name: secrets
+          secret:
+            secretName: {{ template "sharemind.fullname" . }}
+        - name: config
+          configMap:
+            name: {{ template "sharemind.fullname" . }}
+        - name: generated-config
+          emptyDir: {}
+        - name: programs
+          configMap:
+            name: {{ .Values.secrecBinariesConfigmap }}
+        - name: logs
+          emptyDir: {}
+---
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ template "sharemind.fullname" . }}-set
+  annotations:
+    metric-config.external.last-pod-cpu-util.prometheus/interval: 30s
+    metric-config.external.last-pod-cpu-util.prometheus/query: |
+      min(rate(container_cpu_usage_seconds_total{container="{{ template "sharemind.fullname" . }}-worker"}[1m]))by(container)
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ template "sharemind.fullname" . }}-set
+  minReplicas: 1
+  maxReplicas: {{ .Values.clique.maxParallelism }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleUp:
+      selectPolicy: Disabled
+  metrics:
+  - type: External
+    external:
+      metric:
+        name: last-pod-cpu-util
+        selector:
+          matchLabels:
+            type: prometheus
+      target:
+        type: Value
+        value: 10m
